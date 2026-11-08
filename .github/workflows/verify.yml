@@ -1,0 +1,55 @@
+name: Readmeo checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readmeo-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "26.8.1"
+          architecture: x64
+      - name: Provision pinned native pnpm
+        run: |
+          npm install --prefix "$RUNNER_TEMP/readmeo-pnpm" --ignore-scripts --no-audit --no-fund --package-lock=false @pnpm/exe.linux-x64@12.9.1
+          echo "$RUNNER_TEMP/readmeo-pnpm/node_modules/@pnpm/exe.linux-x64" >> "$GITHUB_PATH"
+      - name: Verify toolchain
+        run: |
+          node --version
+          pnpm --version
+          test "$(node --version)" = "v26.8.1"
+          test "$(pnpm --version)" = "12.9.1"
+          node -e "if (require('./package.json').packageManager !== 'pnpm@12.9.1') process.exit(1)"
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/readmeo-pnpm-store"
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Default production build
+        run: pnpm build
+      - name: Confirm package manifest and lockfile unchanged
+        run: git diff --exit-code -- package.json pnpm-lock.yaml
